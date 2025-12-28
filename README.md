@@ -192,7 +192,7 @@ Each kernel in `src/kernel/` demonstrates different optimization strategies whil
 
 1. Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, Christopher Ré. Flash Attention: Fast and Memory-Efficient Exact Attention with IO-Awareness, [arXiv:2205.14135](https://arxiv.org/abs/2205.14135)
 
-2. [The details of flash attention - algorithm](https://ggluo.github.io/blog/flash-attention-1)
+2. ggluo: [The details of flash attention - algorithm](https://ggluo.github.io/blog/flash-attention-1)
 
 
 ## Future Work
