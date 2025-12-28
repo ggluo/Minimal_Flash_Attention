@@ -124,7 +124,7 @@ void test_wmma_attention(const float *__restrict inputQ,
     dim3 grid_dim((d + 15) / 16, (N + 15) / 16, 1);
 
     if (dummy) {
-        printf("Launching dummy WMMA Kernel: Grid[%d, %d], Block[%d]\n", 
+        printf("Launching dummy WMMA Kernel to warmup: Grid[%d, %d], Block[%d]\n", 
            grid_dim.x, grid_dim.y, block_dim.x);
     }
 
