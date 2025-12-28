@@ -111,78 +111,90 @@ bool verify_matrix(float *mat1, float *mat2, int N) {
 
 #define CEIL_DIV(M, N) ((M) + (N)-1) / (N)
 
+template <int Br, int Bc>
 void test_cublas_attention(cublasHandle_t handle,
                         const float *__restrict inputQ,
                         const float *__restrict inputK,
-                        const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
+                        const float *__restrict inputV, int N, int d, 
+                        float *__restrict output) {
     printf("test_cublas_attention\n");
 }
 
+template <int Br, int Bc>
 void test_attention_v1(const float *__restrict inputQ,
                        const float *__restrict inputK,
-                       const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
+                       const float *__restrict inputV, int N, int d, 
+                       float *__restrict output) {
     int num_block_x = (N + Br - 1) / Br;
     int num_block_y = (d + Bc - 1) / Bc;
     dim3 block_dim(Br, Bc, 1);
     dim3 grid_dim(num_block_x, num_block_y, 1);
-    int share_mem = 4 * Br * Bc * sizeof(float); // 由于global函数里面未明确分配内存，此时必须指定共享内存分配大小
+    int share_mem = 4 * Br * Bc * sizeof(float);
     attention_v1<<<grid_dim, block_dim, share_mem>>>(inputQ, inputK, inputV, N, d, Br, Bc, output);
 }
 
+template <int Br, int Bc>
 void test_attention_v2(const float *__restrict inputQ,
                        const float *__restrict inputK,
-                       const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
+                       const float *__restrict inputV, int N, int d, 
+                       float *__restrict output) {
     int num_block_x = (d + Bc - 1) / Bc;
     int num_block_y = (N + Br - 1) / Br;
     dim3 block_dim(Bc, Br, 1);
     dim3 grid_dim(num_block_x, num_block_y, 1);
-    attention_v2<32, 32><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
+    attention_v2<Br, Bc><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
+template <int Br, int Bc>
 void test_attention_v3(const float *__restrict inputQ,
                        const float *__restrict inputK,
-                       const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
-    int Rq = 2;
-    int Rv = 4;
+                       const float *__restrict inputV, int N, int d, 
+                       float *__restrict output) {
+    const int Rq = 2;
+    const int Rv = 4;
     int num_block_x = (d + Rv * Bc - 1) / (Rv * Bc);
     int num_block_y = (N + Rq * Br - 1) / (Rq * Br);
     dim3 grid_dim(num_block_x, num_block_y, 1);
     dim3 block_dim(Bc, Br, 1);
-    attention_v3<32, 32, 2, 4><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
+    attention_v3<Br, Bc, Rq, Rv><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
+template <int Br, int Bc>
 void test_attention_v4(const float *__restrict inputQ,
                        const float *__restrict inputK,
-                       const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
-    int Rq = 3;
-    int Rv = 4;
+                       const float *__restrict inputV, int N, int d, 
+float *__restrict output) {
+    const int Rq = 3;
+    const int Rv = 4;
     int num_block_x = (d + Rv * Bc - 1) / (Rv * Bc);
     int num_block_y = (N + Rq * Br - 1) / (Rq * Br);
     dim3 grid_dim(num_block_x, num_block_y, 1);
     dim3 block_dim(Bc, Br, 1);
-    attention_v4<32, 32, 3, 4><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
+    attention_v4<Br, Bc, Rq, Rv><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
+template <int Br, int Bc>
 void test_attention_v5(const float *__restrict inputQ,
                        const float *__restrict inputK,
-                       const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
-    int Rq = 3;
-    int Rv = 4;
+                       const float *__restrict inputV, int N, int d, 
+float *__restrict output) {
+    const int Rq = 3;
+    const int Rv = 4;
     int num_block_x = (d + Rv * Bc - 1) / (Rv * Bc);
     int num_block_y = (N + Rq * Br - 1) / (Rq * Br);
     dim3 grid_dim(num_block_x, num_block_y, 1);
     dim3 block_dim(Bc, Br, 1);
 
-    attention_v5<32, 32, 3, 4><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
+    attention_v5<Br, Bc, Rq, Rv><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
+template <int Br, int Bc>
 void test_attention_v6(const float *__restrict inputQ,
                        const float *__restrict inputK,
-                       const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
+                       const float *__restrict inputV, int N, int d, 
+float *__restrict output) {
     const int Rq = 8;
     const int Rv = 8; // 必须是4的倍数
-    Br = 16;
-    Bc = 16;
     const int Bk = 8; // 必须是4的倍数
     const int Bd = 8;
     const int numQ = Rq * Br;
@@ -197,14 +209,13 @@ void test_attention_v6(const float *__restrict inputQ,
     attention_v6<16, 16, 8, 8, 8, 8, 8*16, 8*16, 8*16><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
+template <int Br, int Bc>
 void test_attention_v7(const float *__restrict inputQ,
                        const float *__restrict inputK,
-                       const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
+                       const float *__restrict inputV, int N, int d, float *__restrict output) {
 
     const int Rq = 8;
     const int Rv = 8; // 必须是4的倍数
-    Br = 16;
-    Bc = 16;
     const int Bk = 8; // 必须是4的倍数
     const int Bd = 8;
     const int numQ = Rq * Br;
@@ -216,13 +227,13 @@ void test_attention_v7(const float *__restrict inputQ,
     dim3 grid_dim(num_block_x, num_block_y, 1);
     dim3 block_dim(Bc, Br, 1);
 
-    attention_v7<16, 16, 8, 8, 8, 8, 8*16, 8*16, 8*16><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
+    attention_v7<Br, Bc, Rq, Rv, Bd, Bk, numQ, numK, numV><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
 void test_kernel(const float *__restrict inputQ,
                 const float *__restrict inputK,
                 const float *__restrict inputV,
-                float *__restrict output,int N, int d, int Br, int Bc,
+                float *__restrict output,int N, int d,
                 int kernel_num, cublasHandle_t handle) {
     switch (kernel_num) {
         case 0:
@@ -230,25 +241,25 @@ void test_kernel(const float *__restrict inputQ,
             printf("skip cublas\n");
             break;
         case 1:
-            test_attention_v1(inputQ, inputK, inputV, N, d, Br, Bc, output);
+            test_attention_v1<32, 32>(inputQ, inputK, inputV, N, d, output);
             break;
         case 2:
-            test_attention_v2(inputQ, inputK, inputV, N, d, Br, Bc, output);
+            test_attention_v2<32, 32>(inputQ, inputK, inputV, N, d, output);
             break;
         case 3:
-            test_attention_v3(inputQ, inputK, inputV, N, d, Br, Bc, output);
+            test_attention_v3<32, 32>(inputQ, inputK, inputV, N, d, output);
             break;
         case 4:
-            test_attention_v4(inputQ, inputK, inputV, N, d, Br, Bc, output);
+            test_attention_v4<32, 32>(inputQ, inputK, inputV, N, d, output);
             break;
         case 5:
-            test_attention_v5(inputQ, inputK, inputV, N, d, Br, Bc, output);
+            test_attention_v5<32, 32>(inputQ, inputK, inputV, N, d, output);
             break;
         case 6:
-            test_attention_v6(inputQ, inputK, inputV, N, d, Br, Bc, output);
+            test_attention_v6<16, 16>(inputQ, inputK, inputV, N, d, output);
             break;
         case 7:
-            test_attention_v7(inputQ, inputK, inputV, N, d, Br, Bc, output);
+            test_attention_v7<16, 16>(inputQ, inputK, inputV, N, d, output);
             break;
         default:
             break;

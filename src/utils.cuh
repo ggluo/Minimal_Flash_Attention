@@ -42,5 +42,5 @@ kernel操作
 void test_kernel(const float *__restrict inputQ,
                 const float *__restrict inputK,
                 const float *__restrict inputV,
-                float *__restrict output, int N, int d, int Br, int Bc, 
+                float *__restrict output, int N, int d,
                 int kernel_num, cublasHandle_t handle);

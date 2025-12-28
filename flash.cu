@@ -66,12 +66,10 @@ int main(int argc, char **argv)
     cudaCheck(cudaMemcpy(gpu_output, cpu_output, size * sizeof(float), cudaMemcpyHostToDevice));
 
     int repeat = 10;
-    int Br = 32;
-    int Bc = 32;
     cudaEventRecord(beg);
     for (int i = 0; i < repeat; i++)
     {
-        test_kernel(gpu_Q, gpu_K, gpu_V, gpu_output, N, d, Br, Bc, kernel_num, handle);
+        test_kernel(gpu_Q, gpu_K, gpu_V, gpu_output, N, d, kernel_num, handle);
     }
 
     cudaEventRecord(end);
