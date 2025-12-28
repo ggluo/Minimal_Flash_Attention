@@ -9,7 +9,7 @@ int main(int argc, char **argv)
 {
     if (argc != 2)
     {
-        printf("Please select a kernel (range 0 - 7, here 0 is for NVIDIA cuBLAS).\n");
+        printf("Please select a kernel (range 0 - 7).\n");
         exit(EXIT_FAILURE);
     }
 

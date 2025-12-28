@@ -2,15 +2,15 @@
 
 ## Overview
 
-**Minimal Flash Attention** is a minimal, educational implementation of the Flash Attention algorithm in CUDA for inference workloads. This project provides a clear, step-by-step implementation of the Flash Attention algorithm with progressive optimizations across 7 different kernel variants, plus a cuBLAS baseline for comparison.
+**Minimal Flash Attention** is a minimal, educational implementation of the Flash Attention algorithm in CUDA for inference workloads. This project provides a clear, step-by-step implementation of the Flash Attention algorithm with progressive optimizations across 8 different kernel variants (0-7), showcasing various CUDA optimization techniques.
 
 The Flash Attention algorithm is an efficient attention mechanism that reduces memory bandwidth requirements by computing attention scores in a tiled manner with online softmax computation, avoiding the need to store the full attention matrix.
 
 ## Key Features
 
-- **7 Progressive Kernel Implementations**: From basic to optimized versions
+- **8 Progressive Kernel Implementations**: From basic to highly optimized versions including Tensor Core utilization
 - **Educational Focus**: Clean, well-commented code suitable for learning CUDA optimization techniques
-- **Benchmarking**: Compare performance against cuBLAS baseline
+- **Performance Benchmarking**: Compare performance across different optimization strategies
 - **Algorithm Implementation**: Full implementation of Flash Attention with tiling and online softmax
 - **Modular Design**: Separate kernels for different optimization strategies
 
@@ -28,27 +28,28 @@ Minimal_Flash_Attention/
     ├── utils.cuh          # Utility function declarations
     └── kernel/            # Kernel implementations
         ├── common.cuh     # Common reduction operations (MaxOp, SumOp, WarpAllReduce)
+        ├── kernel_0.cuh   # WMMA Tensor Core implementation
         ├── kernel_1.cuh   # Basic Flash Attention implementation
         ├── kernel_2.cuh   # Shared memory optimizations
         ├── kernel_3.cuh   # Loop unrolling (Rq=2, Rv=4)
         ├── kernel_4.cuh   # Further unrolling (Rq=3, Rv=4)
-        ├── kernel_5.cuh   # Additional optimization techniques
-        ├── kernel_6.cuh   # Experimental optimizations
-        └── kernel_7.cuh   # Experimental optimizations
+        ├── kernel_5.cuh   # Using float4
+        ├── kernel_6.cuh   # Optimized warp-level reductions
+        └── kernel_7.cuh   # Optimized pipeline implementation
 ```
 
 ## Kernel Variants
 
-| Kernel | Description | Key Optimizations |
-|--------|-------------|-------------------|
-| **0** | cuBLAS Baseline | Reference implementation using NVIDIA's cuBLAS library |
-| **1** | Basic Implementation | Initial Flash Attention with tiling and online softmax |
-| **2** | Shared Memory Optimized | Improved shared memory usage patterns |
-| **3** | Loop Unrolling (Rq=2, Rv=4) | Unrolled loops for better instruction-level parallelism |
-| **4** | Enhanced Unrolling (Rq=3, Rv=4) | Further loop unrolling optimizations |
-| **5** | Advanced Optimizations | Additional CUDA optimization techniques |
-| **6** | Experimental Optimizations | Placeholder for further improvements |
-| **7** | Experimental Optimizations | Placeholder for further improvements |
+| Kernel | Description | Key Optimizations | Block Sizes |
+|--------|-------------|-------------------|-------------|
+| **0** | WMMA Tensor Core Implementation | Uses NVIDIA's WMMA API for 16x16 matrix operations on Tensor Cores | Block: 32 threads (1 warp)<br>Tile: 16x16 |
+| **1** | Basic Implementation | Initial Flash Attention with tiling and online softmax | Br=32, Bc=32 |
+| **2** | Shared Memory Optimized | Improved shared memory usage patterns with better memory coalescing | Br=32, Bc=32 |
+| **3** | Loop Unrolling (Rq=2, Rv=4) | Unrolled loops for better instruction-level parallelism | Br=32, Bc=32<br>Rq=2, Rv=4 |
+| **4** | Enhanced Unrolling (Rq=3, Rv=4) | Further loop unrolling optimizations | Br=32, Bc=32<br>Rq=3, Rv=4 |
+| **5** | Advanced Optimizations | Additional CUDA optimization techniques with template metaprogramming | Br=32, Bc=32<br>Rq=3, Rv=4 |
+| **6** | Advanced Vectorized Implementation | Vectorized memory operations using `float4`, warp-level reductions, optimized shared memory patterns | Br=16, Bc=16<br>Rq=8, Rv=8<br>Bk=8, Bd=8 |
+| **7** | Optimized Pipeline Implementation | Double-buffered shared memory pipeline, advanced vectorization, optimized computation patterns | Br=16, Bc=16<br>Rq=8, Rv=8<br>Bk=8, Bd=8 |
 
 ## Algorithm Details
 
@@ -112,7 +113,7 @@ The build process will generate an executable named `flash` in the project root 
 
 ### Examples
 ```bash
-# Run cuBLAS baseline (kernel 0)
+# Run WMMA Tensor Core implementation (kernel 0)
 ./flash 0
 
 # Run basic Flash Attention implementation (kernel 1)
@@ -120,6 +121,12 @@ The build process will generate an executable named `flash` in the project root 
 
 # Run optimized implementation (kernel 4)
 ./flash 4
+
+# Run advanced vectorized implementation (kernel 6)
+./flash 6
+
+# Run optimized pipeline implementation (kernel 7)
+./flash 7
 ```
 
 ### Testing All Kernels
@@ -138,12 +145,13 @@ The program will display:
 
 Each kernel represents different optimization levels with expected performance improvements:
 
-1. **Kernel 1**: Basic implementation - demonstrates the core algorithm
-2. **Kernel 2**: Shared memory optimizations - reduces global memory accesses
-3. **Kernel 3-4**: Loop unrolling - improves instruction-level parallelism
-4. **Kernel 5-7**: Advanced optimizations - further performance improvements
+1. **Kernel 0**: WMMA Tensor Core implementation - utilizes NVIDIA Tensor Cores for matrix operations
+2. **Kernel 1**: Basic implementation - demonstrates the core Flash Attention algorithm
+3. **Kernel 2**: Shared memory optimizations - reduces global memory accesses
+4. **Kernel 3-4**: Loop unrolling - improves instruction-level parallelism
+5. **Kernel 5-7**: Advanced optimizations - vectorization, warp-level reductions, and pipeline optimizations
 
-The cuBLAS baseline (kernel 0) provides a reference point for comparison with highly optimized library implementations.
+The performance progression from kernel 1 to 7 demonstrates the impact of various CUDA optimization techniques on the Flash Attention algorithm.
 
 ## Educational Value
 
