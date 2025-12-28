@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(CUDA_FLASH_ATTENTION)
+project(Minimal_Flash_Attention)
 
 # gcc/g++编译参数说明：
 # -O1~3编译器优化选项的4个级别，-O1默认，级别越大优化效果越好，但编译时间越长;
