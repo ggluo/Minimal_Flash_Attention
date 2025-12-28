@@ -111,13 +111,24 @@ bool verify_matrix(float *mat1, float *mat2, int N) {
 
 #define CEIL_DIV(M, N) ((M) + (N)-1) / (N)
 
-template <int Br, int Bc>
-void test_cublas_attention(cublasHandle_t handle,
-                        const float *__restrict inputQ,
+void test_wmma_attention(const float *__restrict inputQ,
                         const float *__restrict inputK,
                         const float *__restrict inputV, int N, int d, 
-                        float *__restrict output) {
-    printf("test_cublas_attention\n");
+                        float *__restrict output, bool dummy) {
+    // Override grid/block for WMMA usage
+    // WMMA typically uses 1 Warp (32 threads) to compute a 16x16 tile.
+    
+    dim3 block_dim(32, 1, 1);
+    
+    // Grid must cover N (rows) and d (cols) in steps of 16
+    dim3 grid_dim((d + 15) / 16, (N + 15) / 16, 1);
+
+    if (dummy) {
+        printf("Launching dummy WMMA Kernel: Grid[%d, %d], Block[%d]\n", 
+           grid_dim.x, grid_dim.y, block_dim.x);
+    }
+
+    attention_wmma<<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
 template <int Br, int Bc>
@@ -206,7 +217,7 @@ float *__restrict output) {
     dim3 grid_dim(num_block_x, num_block_y, 1);
     dim3 block_dim(Bc, Br, 1);
 
-    attention_v6<16, 16, 8, 8, 8, 8, 8*16, 8*16, 8*16><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
+    attention_v6<Br, Bc, Rq, Rv, Bd, Bk, numQ, numK, numV><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
 template <int Br, int Bc>
@@ -234,11 +245,10 @@ void test_kernel(const float *__restrict inputQ,
                 const float *__restrict inputK,
                 const float *__restrict inputV,
                 float *__restrict output,int N, int d,
-                int kernel_num, cublasHandle_t handle) {
+                int kernel_num, bool dummy) {
     switch (kernel_num) {
         case 0:
-            //test_cublas(handle, M, N, K, alpha, A, B, beta, C);
-            printf("skip cublas\n");
+            test_wmma_attention(inputQ, inputK, inputV, N, d, output, dummy);
             break;
         case 1:
             test_attention_v1<32, 32>(inputQ, inputK, inputV, N, d, output);

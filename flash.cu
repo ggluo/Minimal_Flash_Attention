@@ -25,13 +25,6 @@ int main(int argc, char **argv)
         printf("Select kernel %d.\n", kernel_num);
     };
 
-    cublasHandle_t handle;
-    if (cublasCreate(&handle))
-    {
-        printf("Create cublas handle error.\n");
-        exit(EXIT_FAILURE);
-    }
-
     float elapsed_time;
     cudaEvent_t beg, end;
     cudaEventCreate(&beg);
@@ -53,7 +46,7 @@ int main(int argc, char **argv)
     randomize_matrix(cpu_V, size);
     randomize_matrix(cpu_output, size);
 
-    float *gpu_Q, *gpu_K, *gpu_V, *gpu_output;
+    float *gpu_Q=NULL, *gpu_K=NULL, *gpu_V=NULL, *gpu_output=NULL;
 
     cudaCheck(cudaMalloc((void **)&gpu_Q, size * sizeof(float)));
     cudaCheck(cudaMalloc((void **)&gpu_K, size * sizeof(float)));
@@ -66,10 +59,12 @@ int main(int argc, char **argv)
     cudaCheck(cudaMemcpy(gpu_output, cpu_output, size * sizeof(float), cudaMemcpyHostToDevice));
 
     int repeat = 10;
+    
+    test_kernel(gpu_Q, gpu_K, gpu_V, gpu_output, N, d, 0, true);
     cudaEventRecord(beg);
     for (int i = 0; i < repeat; i++)
     {
-        test_kernel(gpu_Q, gpu_K, gpu_V, gpu_output, N, d, kernel_num, handle);
+        test_kernel(gpu_Q, gpu_K, gpu_V, gpu_output, N, d, kernel_num, false);
     }
 
     cudaEventRecord(end);

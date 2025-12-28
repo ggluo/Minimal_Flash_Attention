@@ -1,9 +1,3 @@
-#include <stdio.h>
-#include <cuda_runtime.h>
-#include <math.h>
-#include <cub/block/block_reduce.cuh>
-#include <device_launch_parameters.h>
-
 __global__ void attention_v1(const float *__restrict inputQ,
                                  const float *__restrict inputK,
                                  const float *__restrict inputV, int N, int d, int Br, int Bc,
