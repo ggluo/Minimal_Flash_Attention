@@ -179,13 +179,44 @@ void test_attention_v5(const float *__restrict inputQ,
 void test_attention_v6(const float *__restrict inputQ,
                        const float *__restrict inputK,
                        const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
-    printf("test_attention_v6\n");
+    const int Rq = 8;
+    const int Rv = 8; // 必须是4的倍数
+    Br = 16;
+    Bc = 16;
+    const int Bk = 8; // 必须是4的倍数
+    const int Bd = 8;
+    const int numQ = Rq * Br;
+    const int numK = Bk * Bc;
+    const int numV = Rv * Bc;
+
+    int num_block_x = (d + Rv * Bc - 1) / (Rv * Bc);
+    int num_block_y = (N + Rq * Br - 1) / (Rq * Br);
+    dim3 grid_dim(num_block_x, num_block_y, 1);
+    dim3 block_dim(Bc, Br, 1);
+
+    attention_v6<16, 16, 8, 8, 8, 8, 8*16, 8*16, 8*16><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
 void test_attention_v7(const float *__restrict inputQ,
                        const float *__restrict inputK,
                        const float *__restrict inputV, int N, int d, int Br, int Bc, float *__restrict output) {
-    printf("test_attention_v7\n");
+
+    const int Rq = 8;
+    const int Rv = 8; // 必须是4的倍数
+    Br = 16;
+    Bc = 16;
+    const int Bk = 8; // 必须是4的倍数
+    const int Bd = 8;
+    const int numQ = Rq * Br;
+    const int numK = Bk * Bc;
+    const int numV = Rv * Bc;
+    
+    int num_block_x = (d + Rv * Bc - 1) / (Rv * Bc);
+    int num_block_y = (N + Rq * Br - 1) / (Rq * Br);
+    dim3 grid_dim(num_block_x, num_block_y, 1);
+    dim3 block_dim(Bc, Br, 1);
+
+    attention_v7<16, 16, 8, 8, 8, 8, 8*16, 8*16, 8*16><<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
 }
 
 void test_kernel(const float *__restrict inputQ,
