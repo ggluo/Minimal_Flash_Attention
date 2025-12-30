@@ -44,11 +44,11 @@ Minimal_Flash_Attention/
 |--------|-------------|-------------------|-------------|
 | **0** | WMMA Tensor Core Implementation | Uses NVIDIA's WMMA API for 16x16 matrix operations on Tensor Cores | Block: 32 threads (1 warp)<br>Tile: 16x16 |
 | **1** | Basic Implementation | Initial Flash Attention with tiling and online softmax | Br=32, Bc=32 |
-| **2** | Shared Memory Optimized | Improved shared memory usage patterns with better memory coalescing | Br=32, Bc=32 |
-| **3** | Loop Unrolling (Rq=2, Rv=4) | Unrolled loops for better instruction-level parallelism | Br=32, Bc=32<br>Rq=2, Rv=4 |
-| **4** | Enhanced Unrolling (Rq=3, Rv=4) | Further loop unrolling optimizations | Br=32, Bc=32<br>Rq=3, Rv=4 |
-| **5** | Advanced Optimizations | Additional CUDA optimization techniques with template metaprogramming | Br=32, Bc=32<br>Rq=3, Rv=4 |
-| **6** | Advanced Vectorized Implementation | Vectorized memory operations using `float4`, warp-level reductions, optimized shared memory patterns | Br=16, Bc=16<br>Rq=8, Rv=8<br>Bk=8, Bd=8 |
+| **2** | Shared Memory Optimized | Block tiling using shared memory usage patterns with better memory coalescing, one thread handle an element in a tile | Br=32, Bc=32 |
+| **3** | Register Tiling | Register tiling, one thread handle a tile, better instruction-level parallelism，warp-level reductions | Br=32, Bc=32<br>Rq=2, Rv=4 |
+| **4** | Better Register Tiling | Kernel 3 + shared memory reuse | Br=32, Bc=32<br>Rq=3, Rv=4 |
+| **5** | Vectorized Instructions | Kernel 4 + Vectorized memory operations using `float4` | Br=32, Bc=32<br>Rq=3, Rv=4 |
+| **6** | bank-conflict-free | padded shared memory | Br=16, Bc=16<br>Rq=8, Rv=8<br>Bk=8, Bd=8 |
 | **7** | Optimized Pipeline Implementation | Double-buffered shared memory pipeline, advanced vectorization, optimized computation patterns | Br=16, Bc=16<br>Rq=8, Rv=8<br>Bk=8, Bd=8 |
 
 ## Algorithm Details
