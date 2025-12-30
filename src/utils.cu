@@ -145,6 +145,17 @@ void test_attention_v1(const float *__restrict inputQ,
 }
 
 template <int Br, int Bc>
+void test(const float *__restrict inputQ,
+                       const float *__restrict inputK,
+                       const float *__restrict inputV, int N, int d, 
+                       float *__restrict output) {
+    dim3 block(Br, Bc);
+    dim3 grid((N + Br - 1)/Br, (d + Bc - 1)/Bc);
+    size_t shared_bytes = Br*Bc*sizeof(float) + 2*Br*sizeof(float);
+    test<<<grid, block, shared_bytes>>>(inputQ, inputK, inputV, N, d, Br, Bc, output);
+}
+
+template <int Br, int Bc>
 void test_attention_v2(const float *__restrict inputQ,
                        const float *__restrict inputK,
                        const float *__restrict inputV, int N, int d, 
@@ -270,6 +281,9 @@ void test_kernel(const float *__restrict inputQ,
             break;
         case 7:
             test_attention_v7<16, 16>(inputQ, inputK, inputV, N, d, output);
+            break;
+        case 8:
+            test<32, 32>(inputQ, inputK, inputV, N, d, output);
             break;
         default:
             break;

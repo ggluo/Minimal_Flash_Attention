@@ -15,9 +15,9 @@ int main(int argc, char **argv)
 
     // cuda kernel num
     int kernel_num = atoi(argv[1]);
-    if (kernel_num < 0 || kernel_num > 7)
+    if (kernel_num < 0 || kernel_num > 8)
     {
-        printf("Please enter a valid kernel number (0-7).\n");
+        printf("Please enter a valid kernel number (0-8).\n");
         exit(EXIT_FAILURE);
     }
     else

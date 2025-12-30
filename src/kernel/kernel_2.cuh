@@ -5,87 +5,67 @@ __global__ void attention_v2(const float *__restrict inputQ,
                                  float *__restrict output)
 {
 
-    //  一个线程块处理Q的Br行，V的Bc列，以及全部的K,blockDim.x=Bc,blockDim.y=Br
-    int Tc = (N + Bc - 1) / Bc; // 遍历矩阵inputK的N行需要的循环次数
+    
+    int col = threadIdx.x + blockIdx.x * blockDim.x;
+    int row = threadIdx.y + blockIdx.y * blockDim.y;
+    if (row >= N || col >= d) return;
 
-    __shared__ float sumQK[Br * Bc];
-    __shared__ float sumSV[Br * Bc];
+    int steps = (N + Bc - 1) / Bc;
+
+    __shared__ float QK_T[Br * Bc];
+    __shared__ float SV[Br * Bc];
     __shared__ float block_max[Br * Bc];
     __shared__ float block_sum[Br * Bc];
     __shared__ float Vds[Bc * Bc];
     __shared__ float Qds[Br * Bc];
     __shared__ float Kds[Bc * Bc];
-    int indV = threadIdx.x +
-               blockIdx.x * blockDim.x; // 对应的是当前block需要处理的V的列索引
-    int indQ = threadIdx.y + blockIdx.y * blockDim.y;
-    float newMax;
-    float oldMax;
-    float newSum;
-    newMax = -__FLT_MAX__;
-    oldMax = -__FLT_MAX__;
-    newSum = 1.0f;
+    
+    float curr_max = -__FLT_MAX__;
+    float prev_max = -__FLT_MAX__;
+    float curr_sum = 1.0f;
+    float prev_sum = 1.0f;
 
-    float out = 0.0f;
-    for (int j = 0; j < Tc; j++)
+    float acc_o = 0.0f;
+    for (int j = 0; j < steps; j++)
     {
-        sumSV[threadIdx.y * Bc + threadIdx.x] =
-            0.0f;                        // 每次循环需要重新初始化为0
-        int indK = threadIdx.x + j * Bc; // 通过j循环来遍历K的行索引
-        float sum_qk = 0.0f;
+        int start = threadIdx.y * Bc;
+        int block_index = start + threadIdx.x;
+        SV[block_index] = 0.0f;
+
+        int k_row_index = threadIdx.x + j * Bc;
+        float qk_dot = 0.0f;
         for (int ph = 0; ph < gridDim.x; ph++)
         {
-            if (indQ < N && threadIdx.x + ph * Bc < d)
-            {
-                Qds[threadIdx.y * Bc + threadIdx.x] =
-                    inputQ[indQ * d + threadIdx.x + ph * Bc];
-            }
+            if (row < N && threadIdx.x + ph * Bc < d)
+                Qds[block_index] = inputQ[row * d + threadIdx.x + ph * Bc];
             else
-            {
-                Qds[threadIdx.y * Bc + threadIdx.x] = 0.0f;
-            }
+                Qds[block_index] = 0.0f;
             if (threadIdx.y < Bc)
-            {
-                Kds[threadIdx.y * Bc + threadIdx.x] = 0.0f;
-            }
+                Kds[block_index] = 0.0f;
             if (threadIdx.y < Bc)
-            {
-                if (indK < N && threadIdx.y + ph * Bc < d)
-                {
-                    Kds[threadIdx.y * Bc + threadIdx.x] =
-                        inputK[indK * d + threadIdx.y + ph * Bc];
-                }
-            }
+                if (k_row_index < N && threadIdx.y + ph * Bc < d)
+                    Kds[block_index] = inputK[k_row_index * d + threadIdx.y + ph * Bc];
 
             __syncthreads();
             for (int index = 0; index < Bc; index++)
             {
-                sum_qk = std::fma(Qds[threadIdx.y * Bc + index],
-                                  Kds[index * Bc + threadIdx.x], sum_qk);
-                // if (index + ph * Bc < d) {
-                //     sum_qk += Qds[threadIdx.y * Bc + index] *
-                //               Kds[index * Bc + threadIdx.x];
-                // }
-                // if (index + ph * Bc < d) {
-                //     sum_qk =
-                //         std::fma(inputQ[indQ * d + index + ph * Bc],
-                //                  inputK[indK * d + index + ph * Bc], sum_qk);
-                // }
+                qk_dot = std::fma(Qds[start + index],
+                                  Kds[index * Bc + threadIdx.x], qk_dot);
             }
             __syncthreads();
         }
 
-        if (indQ < N && indK < N)
+        if (row < N && k_row_index < N)
         {
-            block_max[threadIdx.y * Bc + threadIdx.x] = sum_qk;
-            block_sum[threadIdx.y * Bc + threadIdx.x] = 1.0f;
-            sumQK[threadIdx.y * Bc + threadIdx.x] =
-                sum_qk; // 存储QK的结果，循环内部不做修改
+            block_max[block_index] = qk_dot;
+            block_sum[block_index] = 1.0f;
+            QK_T[block_index] = qk_dot;
         }
         else
         {
-            block_max[threadIdx.y * Bc + threadIdx.x] = -__FLT_MAX__;
-            block_sum[threadIdx.y * Bc + threadIdx.x] = 0.0f;
-            sumQK[threadIdx.y * Bc + threadIdx.x] = 0.0f;
+            block_max[block_index] = -__FLT_MAX__;
+            block_sum[block_index] = 0.0f;
+            QK_T[block_index] = 0.0f;
         }
         __syncthreads();
 
@@ -93,81 +73,60 @@ __global__ void attention_v2(const float *__restrict inputQ,
         {
             if (threadIdx.x < strip)
             {
-                if (block_max[threadIdx.y * Bc + threadIdx.x] >
-                    block_max[threadIdx.y * Bc + threadIdx.x + strip])
+                if (block_max[block_index] > block_max[block_index + strip])
                 {
-                    block_sum[threadIdx.y * Bc + threadIdx.x] =
-                        block_sum[threadIdx.y * Bc + threadIdx.x] +
-                        block_sum[threadIdx.y * Bc + threadIdx.x + strip] *
-                            __expf(block_max[threadIdx.y * Bc + threadIdx.x +
-                                             strip] -
-                                   block_max[threadIdx.y * Bc + threadIdx.x]);
+                    block_sum[block_index] = block_sum[block_index] + block_sum[block_index + strip] *
+                            __expf(block_max[block_index + strip] - block_max[block_index]);
                 }
                 else
                 {
-                    block_sum[threadIdx.y * Bc + threadIdx.x] =
-                        block_sum[threadIdx.y * Bc + threadIdx.x + strip] +
-                        block_sum[threadIdx.y * Bc + threadIdx.x] *
-                            __expf(block_max[threadIdx.y * Bc + threadIdx.x] -
-                                   block_max[threadIdx.y * Bc + threadIdx.x +
-                                             strip]);
-                    block_max[threadIdx.y * Bc + threadIdx.x] =
-                        block_max[threadIdx.y * Bc + threadIdx.x + strip];
+                    block_sum[block_index] =
+                        block_sum[block_index + strip] + block_sum[block_index] *
+                            __expf(block_max[block_index] - block_max[block_index + strip]);
+                    block_max[block_index] = block_max[block_index + strip];
                 }
             }
             __syncthreads();
         }
 
-        if (newMax >
-            block_max[threadIdx.y *
-                      Bc]) // threadIdx.y=0存储的是对应分块矩阵的局部max
-        {                  // 为了获得全局max，需要不断更新newMax和threadIdx.y=0的比较结果
-            newSum = newSum + block_sum[threadIdx.y * Bc] *
-                                  __expf(block_max[threadIdx.y * Bc] - newMax);
+        if (curr_max > block_max[start]) 
+        {
+            prev_sum = curr_sum;
+            prev_max = curr_max;
+            curr_sum = prev_sum + block_sum[start] *__expf(block_max[start] - curr_max);
         }
         else
         {
-            newSum = block_sum[threadIdx.y * Bc] +
-                     newSum * __expf(newMax - block_max[threadIdx.y * Bc]);
-            newMax = block_max[threadIdx.y * Bc];
+            prev_sum = curr_sum;
+            prev_max = curr_max;
+            curr_max = block_max[start];
+            curr_sum = block_sum[start] + prev_sum * __expf(prev_max - curr_max);
         }
+
         if (threadIdx.y < Bc)
-        { // threadIdx.y的范围必须>=Bc
-            if (threadIdx.y + j * Bc < N && indV < d)
-            {
-                Vds[threadIdx.x * Bc + threadIdx.y] =
-                    inputV[(threadIdx.y + j * Bc) * d + indV];
-            }
+            if (threadIdx.y + j * Bc < N && col < d)
+                Vds[threadIdx.x * Bc + threadIdx.y] = inputV[(threadIdx.y + j * Bc) * d + col];
             else
-            {
                 Vds[threadIdx.x * Bc + threadIdx.y] = 0.0f;
-            }
-        }
-        if (indQ < N && indK < N)
-        {
-            sumQK[threadIdx.y * Bc + threadIdx.x] =
-                __expf(sumQK[threadIdx.y * Bc + threadIdx.x] - newMax);
-        }
+
+        if (row < N && k_row_index < N)
+            QK_T[block_index] = __expf(QK_T[block_index] - curr_max);
         else
-        {
-            sumQK[threadIdx.y * Bc + threadIdx.x] = 0.0f;
-        }
+            QK_T[block_index] = 0.0f;
+
         __syncthreads();
 
-        for (int phc = 0; phc < Bc; phc++) // 这里开始做最后和V的matmul
+        for (int phc = 0; phc < Bc; phc++)
         {
-            sumSV[threadIdx.y * Bc + threadIdx.x] = std::fma(
-                sumQK[threadIdx.y * Bc + phc], Vds[threadIdx.x * Bc + phc],
-                sumSV[threadIdx.y * Bc + threadIdx.x]);
+            SV[block_index] = std::fma(
+                QK_T[start + phc], Vds[threadIdx.x * Bc + phc],
+                SV[block_index]);
         }
-        out = __expf(oldMax - newMax) * out +
-              sumSV[threadIdx.y * Bc + threadIdx.x];
-        oldMax = newMax;
+        acc_o = __expf(prev_max - curr_max) * acc_o * prev_sum + SV[block_index];
+        acc_o = acc_o * __fdividef(1.0F, curr_sum);
 
         __syncthreads();
     }
-    if (indQ < N && indV < d)
-    {
-        output[indQ * d + indV] = out * __fdividef(1.0F, newSum);
-    }
+
+    output[row * d + col] = acc_o;
 }
