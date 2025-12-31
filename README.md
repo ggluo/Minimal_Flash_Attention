@@ -76,7 +76,6 @@ The implementation follows the standard Flash Attention algorithm:
 
 ## Build Instructions
 
-### Method 1: Using the provided script (Recommended)
 ```bash
 # Make the script executable
 chmod +x run.sh
@@ -84,24 +83,7 @@ chmod +x run.sh
 # Run the script (builds and tests all kernels)
 ./run.sh
 ```
-
-### Method 2: Manual build with CMake
-```bash
-# Create build directory
-mkdir build
-cd build
-
-# Configure with CMake
-cmake ..
-
-# Build the project
-make
-
-# Return to project root
-cd ..
-```
-
-The build process will generate an executable named `flash` in the project root directory.
+The build process will generate an executable named `flash` in the project root directory. The `run.sh` script automatically builds the project and runs all kernels (0-7), displaying their execution times
 
 ## Usage
 
@@ -119,43 +101,17 @@ The build process will generate an executable named `flash` in the project root 
 # Run basic Flash Attention implementation (kernel 1)
 ./flash 1
 
-# Run optimized implementation (kernel 4)
-./flash 4
-
-# Run advanced vectorized implementation (kernel 6)
-./flash 6
-
-# Run optimized pipeline implementation (kernel 7)
-./flash 7
-```
-
-### Testing All Kernels
-The `run.sh` script automatically builds the project and runs all kernels (0-7), displaying their execution times:
-```bash
-./run.sh
+....
 ```
 
 ### Program Output
 The program will display:
 - Selected kernel number
 - Average execution time over 10 runs (in milliseconds)
-- Matrix dimensions and block sizes used
-
-## Performance Characteristics
-
-Each kernel represents different optimization levels with expected performance improvements:
-
-1. **Kernel 0**: WMMA Tensor Core implementation - utilizes NVIDIA Tensor Cores for matrix operations
-2. **Kernel 1**: Basic implementation - demonstrates the core Flash Attention algorithm
-3. **Kernel 2**: Shared memory optimizations - reduces global memory accesses
-4. **Kernel 3-4**: Loop unrolling - improves instruction-level parallelism
-5. **Kernel 5-7**: Advanced optimizations - vectorization, warp-level reductions, and pipeline optimizations
-
-The performance progression from kernel 1 to 7 demonstrates the impact of various CUDA optimization techniques on the Flash Attention algorithm.
 
 ## Educational Value
 
-This project serves as an excellent educational resource for:
+This project serves as an educational resource for:
 
 ### CUDA Programming Concepts
 - **Shared Memory Usage**: Efficient data sharing between threads
