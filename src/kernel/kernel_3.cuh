@@ -119,7 +119,7 @@ __global__ void attention_v3(const float *__restrict inputQ,
                                  const float *__restrict inputV, int N, int d,
                                  float *__restrict output)
 {
-
+    // one thread handle Rq * Rv output elements
     __shared__ float sumQK[Rq * Br * Bc];
     float sumSV[Rq * Rv];
     __shared__ float block_max[Rq][Br];

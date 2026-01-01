@@ -34,6 +34,9 @@ __global__ void attention_v1(const float *__restrict inputQ,
     float curr_sum = 1.0f;
     float prev_sum = 1.0f;
 
+    // Scale factor for attention: 1 / sqrt(d)
+    float scale = 1.0f / sqrtf((float)d);
+
     // O[row, col]
     float acc_o = 0.0f;
     // loop over K and V using step size Bc
@@ -54,6 +57,8 @@ __global__ void attention_v1(const float *__restrict inputQ,
         {
             qk_dot += inputQ[row * d + index] * inputK[k_row_index * d + index];
         }
+        // Apply scale factor: QK^T / sqrt(d)
+        qk_dot *= scale;
         if (row < N && k_row_index < N)
         {
             b_max[block_index] = qk_dot; 
@@ -137,6 +142,9 @@ __global__ void test(const float *__restrict__ inputQ,
     float *local_max = sram + Br * Bc;    // Br
     float *local_sum = sram + Br * Bc + Br; // Br
 
+    // Scale factor for attention: 1 / sqrt(d)
+    float scale = 1.0f / sqrtf((float)d);
+
     // Per-thread registers for online softmax (one per output row)
     float thread_max = -__FLT_MAX__;
     float thread_sum = 0.0f;
@@ -152,6 +160,8 @@ __global__ void test(const float *__restrict__ inputQ,
             for (int i = 0; i < d; ++i) {
                 qk += inputQ[row * d + i] * inputK[k_idx * d + i];
             }
+            // Apply scale factor: QK^T / sqrt(d)
+            qk *= scale;
         } else {
             qk = -__FLT_MAX__;
         }
