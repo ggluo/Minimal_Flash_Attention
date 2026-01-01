@@ -124,6 +124,9 @@ __global__ void attention_v4(const float *__restrict inputQ,
     __shared__ float shareQK[Rq * Br * Bc];
     __shared__ float shareVK[Bc * Bc * Rv];
 
+    // Scale factor for attention: 1 / sqrt(d)
+    float scale = 1.0f / sqrtf((float)d);
+
     float sumSV[Rq * Rv];
     float newMax[Rq];
     float oldMax[Rq];
@@ -161,6 +164,12 @@ __global__ void attention_v4(const float *__restrict inputQ,
 
         matmulRQK<Br, Bc, Rq>(inputQ, inputK, shareQK, shareVK, N, d, width,
                               indQ, indK, regLeft, val);
+        
+        // Apply scale factor: QK^T / sqrt(d)
+        for (int index_q = 0; index_q < Rq; index_q++)
+        {
+            val[index_q] *= scale;
+        }
         for (int index_q = 0; index_q < Rq; index_q++)
         {
             if (indQ + index_q < N && indK < N)

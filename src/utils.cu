@@ -118,17 +118,16 @@ void test_wmma_attention(const float *__restrict inputQ,
     // Override grid/block for WMMA usage
     // WMMA typically uses 1 Warp (32 threads) to compute a 16x16 tile.
     
-    dim3 block_dim(32, 1, 1);
-    
-    // Grid must cover N (rows) and d (cols) in steps of 16
-    dim3 grid_dim((d + 15) / 16, (N + 15) / 16, 1);
-
+    dim3 grid_dim((N + 15) / 16, (d + 15) / 16);
+    dim3 block_dim(32); // 1 Warp
+    // Calculate Shared Mem size: 3 * 256 * sizeof(half) + 256 * sizeof(float)
+    size_t shmem_size = (3 * 256 * 2) + (256 * 4); 
     if (dummy) {
         printf("Launching dummy WMMA Kernel to warmup: Grid[%d, %d], Block[%d]\n", 
            grid_dim.x, grid_dim.y, block_dim.x);
     }
 
-    attention_wmma<<<grid_dim, block_dim>>>(inputQ, inputK, inputV, N, d, output);
+    attention_wmma<<<grid_dim, block_dim, shmem_size>>>(inputQ, inputK, inputV, N, d, output);
 }
 
 template <int Br, int Bc>

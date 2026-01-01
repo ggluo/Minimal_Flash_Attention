@@ -188,21 +188,21 @@ def main():
     start_time = time.time()
     O_std = standard_self_attention(Q, K, V)
     elapsed_std = time.time() - start_time
-    print(f"   Completed in {elapsed_std:.3f} seconds")
+    print(f"   Completed in {elapsed_std*1000:.3f} ms")
     
     # 2. Online Softmax Attention
     print("2. Computing Online Softmax Attention...")
     start_time = time.time()
     O_online = online_softmax_attention(Q, K, V)
     elapsed_online = time.time() - start_time
-    print(f"   Completed in {elapsed_online:.3f} seconds")
+    print(f"   Completed in {elapsed_online*1000:.3f} ms")
     
     # 3. Flash Attention (Tiled)
     print("3. Computing Flash Attention (Tiled)...")
     start_time = time.time()
     O_flash = flash_attention_tiled(Q, K, V, block_size=32)
     elapsed_flash = time.time() - start_time
-    print(f"   Completed in {elapsed_flash:.3f} seconds")
+    print(f"   Completed in {elapsed_flash*1000:.3f} ms")
     
     # Save reference outputs
     print("\nSaving reference outputs to files...")

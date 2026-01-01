@@ -20,6 +20,9 @@ __global__ void attention_v2(const float *__restrict inputQ,
     __shared__ float Qds[Br * Bc];
     __shared__ float Kds[Bc * Bc];
     
+    // Scale factor for attention: 1 / sqrt(d)
+    float scale = 1.0f / sqrtf((float)d);
+
     float curr_max = -__FLT_MAX__;
     float prev_max = -__FLT_MAX__;
     float curr_sum = 1.0f;
@@ -54,6 +57,8 @@ __global__ void attention_v2(const float *__restrict inputQ,
             }
             __syncthreads();
         }
+        // Apply scale factor: QK^T / sqrt(d)
+        qk_dot *= scale;
 
         if (row < N && k_row_index < N)
         {

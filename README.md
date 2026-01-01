@@ -14,29 +14,6 @@ The Flash Attention algorithm is an efficient attention mechanism that reduces m
 - **Algorithm Implementation**: Full implementation of Flash Attention with tiling and online softmax
 - **Modular Design**: Separate kernels for different optimization strategies
 
-## Project Structure
-
-```
-Minimal_Flash_Attention/
-├── CMakeLists.txt          # CMake build configuration
-├── flash.cu               # Main driver program
-├── run.sh                 # Automated build and test script
-├── README.md              # This file
-└── src/
-    ├── kernel.cuh         # Kernel header aggregator
-    ├── utils.cu           # Utility function implementations
-    ├── utils.cuh          # Utility function declarations
-    └── kernel/            # Kernel implementations
-        ├── common.cuh     # Common reduction operations (MaxOp, SumOp, WarpAllReduce)
-        ├── kernel_0.cuh   # WMMA Tensor Core implementation
-        ├── kernel_1.cuh   # Basic Flash Attention implementation
-        ├── kernel_2.cuh   # Shared memory optimizations
-        ├── kernel_3.cuh   # Loop unrolling (Rq=2, Rv=4)
-        ├── kernel_4.cuh   # Further unrolling (Rq=3, Rv=4)
-        ├── kernel_5.cuh   # Using float4
-        ├── kernel_6.cuh   # Optimized warp-level reductions
-        └── kernel_7.cuh   # Optimized pipeline implementation
-```
 
 ## Kernel Variants
 
@@ -83,7 +60,7 @@ chmod +x run.sh
 # Run the script (builds and tests all kernels)
 ./run.sh
 ```
-The build process will generate an executable named `flash` in the project root directory. The `run.sh` script automatically builds the project and runs all kernels (0-7), displaying their execution times
+The build process will generate an executable named `flash` in the project root directory. The `run.sh` script automatically builds the project, runs all kernels (0-7), and validates their correctness against a Python reference implementation.
 
 ## Usage
 
@@ -108,6 +85,45 @@ The build process will generate an executable named `flash` in the project root 
 The program will display:
 - Selected kernel number
 - Average execution time over 10 runs (in milliseconds)
+- Validation results comparing with Python reference implementation
+
+### Validation and Testing
+The project includes a comprehensive validation system to verify the correctness of each CUDA kernel:
+
+```bash
+# Run the complete validation suite
+./run.sh
+
+# Output includes:
+# 1. Python reference implementation results
+# 2. CUDA kernel execution times
+# 3. Comparison with Python reference (tolerance: 1e-4)
+# 4. Pass/Fail status for each kernel
+```
+
+**Example kernel execution times** (on typical hardware):
+- Kernel 0 (WMMA): 0.602 ms
+- Kernel 1 (Basic): 259.100 ms
+- Kernel 2 (Shared Memory): 32.968 ms
+- Kernel 3 (Register Tiling): 6.029 ms
+- Kernel 4 (Better Register Tiling): 4.661 ms
+- Kernel 5 (Vectorized): 5.664 ms
+- Kernel 6 (Bank-conflict-free): 2.310 ms
+- Kernel 7 (Optimized Pipeline): 2.022 ms
+
+**Validation Tools**:
+- `compare.py`: Compare two output files with configurable tolerance
+- `flash.py`: Python reference implementation of Flash Attention
+- `run.sh`: Automated build, test, and validation script
+
+**Validation Process**:
+1. Python generates reference outputs using three algorithms:
+   - Standard Self-Attention
+   - Online Softmax Attention
+   - Flash Attention Tiled
+2. Each CUDA kernel (0-7) runs and produces output
+3. Kernel outputs are compared with Python reference (standard self-attention)
+4. Results are validated within tolerance (1e-4 by default)
 
 ## Educational Value
 
@@ -142,6 +158,11 @@ This project serves as an educational resource for:
 - CUDA error checking
 - Timing functions
 - Device information display
+
+#### 5. Validation System
+- `compare.py`: File comparison with error statistics
+- `flash.py`: Python reference implementation
+- `run.sh`: Automated testing and validation
 
 #### 3. Main Driver (`flash.cu`)
 - Command-line argument parsing

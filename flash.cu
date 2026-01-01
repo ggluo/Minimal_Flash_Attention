@@ -123,7 +123,7 @@ int main(int argc, char **argv)
     cudaFree(gpu_V);
     cudaFree(gpu_output);
     
-    printf("Average elapsed time: (%f) millisecond.\n",
+    printf("Average elapsed time: (%f) ms.\n",
            elapsed_time / repeat);
 
     free(cpu_Q);

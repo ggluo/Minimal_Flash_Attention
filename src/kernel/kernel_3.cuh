@@ -125,6 +125,9 @@ __global__ void attention_v3(const float *__restrict inputQ,
     __shared__ float block_max[Rq][Br];
     __shared__ float block_sum[Rq][Br];
 
+    // Scale factor for attention: 1 / sqrt(d)
+    float scale = 1.0f / sqrtf((float)d);
+
     int indV = Rv * (threadIdx.x + blockIdx.x * blockDim.x);
     int indQ = Rq * (threadIdx.y + blockIdx.y * blockDim.y);
     float newMax[Rq];
@@ -164,6 +167,12 @@ __global__ void attention_v3(const float *__restrict inputQ,
 
         matmulRQK_3<Br, Bc, Rq>(inputQ, inputK, Qds, Kds, N, d, width, indQ, indK,
                               regLeft, val);
+        
+        // Apply scale factor: QK^T / sqrt(d)
+        for (int index_q = 0; index_q < Rq; index_q++)
+        {
+            val[index_q] *= scale;
+        }
         for (int index_q = 0; index_q < Rq; index_q++)
         {
             if (indQ + index_q < N && indK < N)

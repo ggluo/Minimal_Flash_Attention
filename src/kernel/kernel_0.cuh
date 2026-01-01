@@ -1,224 +1,257 @@
-#include <mma.h>
+#include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <mma.h>
+#include <cmath>
 
 using namespace nvcuda;
 
 // =========================================================================
-// Helper: FP32 -> FP16 conversion
+// Configuration & Constants
 // =========================================================================
-__device__ inline __half to_half(float f) {
-    return __float2half(f);
+#define WMMA_M 16
+#define WMMA_N 16
+#define WMMA_K 16
+#define WARP_SIZE 32
+
+
+// =========================================================================
+// Device Helper: Load float -> half shared memory
+// =========================================================================
+__device__ void load_float_to_half(half *shmem_ptr, const float *global_ptr, 
+                                   int rows, int cols, int stride, 
+                                   int row_offset, int col_offset, 
+                                   int max_rows, int max_cols) 
+{
+    // Each warp loads a 16x16 tile (256 elements)
+    // 32 threads -> 8 elements per thread
+    int tid = threadIdx.x;
+    int lane_row = tid / 2; // Map threads to coverage
+    
+    // Simple coalesced loading strategy for 16x16 block
+    // Thread i loads indices i, i+32, i+64...
+    #pragma unroll
+    for (int i = 0; i < 8; ++i) {
+        int idx = tid + i * 32;
+        int r = idx / 16;
+        int c = idx % 16;
+        
+        int global_r = row_offset + r;
+        int global_c = col_offset + c;
+
+        float val = 0.0f;
+        if (global_r < max_rows && global_c < max_cols) {
+            val = global_ptr[global_r * stride + global_c];
+        }
+        shmem_ptr[r * 16 + c] = __float2half(val);
+    }
 }
 
 // =========================================================================
-// Kernel: FlashAttention using WMMA (Tensor Cores)
-// Block Size: 32 threads (1 Warp)
-// Grid Size: (d / 16, N / 16)
-// Each block computes a 16x16 output tile
+// Kernel: FlashAttention WMMA
+// 
+// Grid: (N / 16, d / 16)
+// Block: 32 threads (1 warp)
+// Shared Mem: Requires space for Q(16x16), K(16x16), V(16x16) + buffers
 // =========================================================================
-__global__ void attention_wmma(const float *__restrict__ inputQ,
-                               const float *__restrict__ inputK,
-                               const float *__restrict__ inputV,
-                               int N, int d,
-                               float *__restrict__ output)
+__global__ void attention_wmma(
+    const float *__restrict__ Q,
+    const float *__restrict__ K,
+    const float *__restrict__ V,
+    int N, int d,
+    float *__restrict__ O)
 {
-    // WMMA Tile Dimensions
-    const int WMMA_M = 16;
-    const int WMMA_N = 16;
-    const int WMMA_K = 16;
+    // ----------------------------------------------------------------
+    // 1. Setup & Shared Memory Allocation
+    // ----------------------------------------------------------------
+    // We need segments for Q, K, V (in half) and O/Scores (in float/half)
+    // Layout:
+    // [0]: Q_tile (16x16 half) = 256 * 2 bytes
+    // [1]: K_tile (16x16 half) = 256 * 2 bytes
+    // [2]: V_tile (16x16 half) = 256 * 2 bytes
+    // [3]: Temp/Accumulator buffer (16x16 float) = 256 * 4 bytes
+    extern __shared__ half shmem_pool[];
+    
+    half *shmem_q = shmem_pool;
+    half *shmem_k = shmem_q + 256;
+    half *shmem_v = shmem_k + 256;
+    float *shmem_f = (float*)&shmem_v[256]; // Reusable float buffer
 
-    // Current Tile Coordinates (Global)
-    // One block handles one 16x16 output tile
-    int row_offset = blockIdx.y * WMMA_M; // Q dimension
-    int col_offset = blockIdx.x * WMMA_N; // Head Dimension (d)
-
-    if (row_offset >= N || col_offset >= d) return;
+    // Indices
+    int tx = threadIdx.x;
+    int q_block_idx = blockIdx.x; // Which chunk of Queries (rows 0..15, 16..31)
+    int head_block_idx = blockIdx.y; // Which chunk of Head Dim (cols 0..15, 16..31)
+    
+    int row_q_start = q_block_idx * 16;
+    int col_d_start = head_block_idx * 16;
 
     // Fragments
-    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __half, wmma::row_major> frag_Q;
-    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __half, wmma::col_major> frag_K;
-    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __half, wmma::row_major> frag_V;
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> q_frag;
+    wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> k_frag; // Transposed load for K
+    wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> v_frag;
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> p_frag;
     
     // Accumulators
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_S; // Scores Q*K
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_O; // Output
-    
-    // Softmax stats (Max, Sum) stored in registers/shared
-    // Since we are 1 warp, we can keep stats in registers or simplified shared
-    // Note: Standard FlashAttention keeps running max/sum. 
-    // For this simple tile implementation, we use simple registers.
-    
-    wmma::fill_fragment(acc_O, 0.0f);
-    
-    // Running statistics for online softmax
-    // We treat the fragment values as a "row" roughly, but since fragment layout is opaque,
-    // we need to dump to shared memory to perform accurate row-wise Max/Sum.
-    __shared__ float smem_stats_max[WMMA_M]; 
-    __shared__ float smem_stats_sum[WMMA_M];
-    
-    // Initialize stats
-    if (threadIdx.x < WMMA_M) {
-        smem_stats_max[threadIdx.x] = -1e20f; // -Inf
-        smem_stats_sum[threadIdx.x] = 0.0f;
-    }
+    wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_s; // Scores
+    wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_o; // Output
 
-    // Shared memory buffer for loading tiles (Reused)
-    // Size large enough for a 16x16 float or half tile
-    __shared__ __half smem_buffer[WMMA_M * WMMA_K]; 
+    wmma::fill_fragment(acc_o, 0.0f);
 
-    int laneId = threadIdx.x;
+    // Online Softmax Stats
+    float m_prev = -INFINITY;
+    float l_prev = 0.0f;
+    float softmax_scale = 1.0f / sqrtf((float)d);
 
-    // Loop over K dimension (Sequence Length N)
-    // We process K and V in chunks of 16
-    for (int k_idx = 0; k_idx < N; k_idx += WMMA_K) {
+    // ----------------------------------------------------------------
+    // 2. Loop over Sequence Length (N) in chunks of 16 (The 'K' and 'V' blocks)
+    // ----------------------------------------------------------------
+    for (int k_block = 0; k_block < N; k_block += 16) {
         
-        // -----------------------------------------------------------
-        // 1. COMPUTE S = Q * K^T
-        // -----------------------------------------------------------
-        
-        // Load Q Tile (16x16) from Global -> Shared -> Fragment
-        // Coalesced load strategy with float->half conversion
-        for (int i = laneId; i < WMMA_M * WMMA_K; i += 32) {
-            int r = i / WMMA_K;
-            int c = i % WMMA_K;
-            if (row_offset + r < N && k_idx + c < d) // Assuming d is dim for Q/K dot
-                 smem_buffer[i] = to_half(inputQ[(row_offset + r) * d + (k_idx + c)]);
-            else smem_buffer[i] = to_half(0.0f);
-        }
-        // Sync not strictly needed if we assume warp-synchronous, but good practice
-        // With cp.async we would need standard sync.
-        
-        wmma::load_matrix_sync(frag_Q, smem_buffer, WMMA_K);
+        // --- Step A: Compute S = Q * K^T ---
+        // Q is 16xd, K is 16xd (transposed conceptually to dx16 for mult)
+        // We accumulate over the 'd' dimension.
+        wmma::fill_fragment(acc_s, 0.0f);
 
-        // Load K Tile (16x16) from Global -> Shared -> Fragment
-        // Note: Logic handles Transpose by loading conventions
-        for (int i = laneId; i < WMMA_M * WMMA_K; i += 32) {
-            int r = i / WMMA_K; // Actually K_row
-            int c = i % WMMA_K; // Actually K_col (embedding dim)
-            // K is (N x d). We want K^T. 
-            // We load normal (k_idx + r) * d + c. 
-            // WMMA Col_Major frag_b expects columns.
-            // Simplified: We assume standard dot product Q(row) . K(row from DB)
-            // FlashAttention usually is Q * K^T. 
-            // Here we treat inputK as N x d.
+        for (int d_chunk = 0; d_chunk < d; d_chunk += 16) {
+            // Load Q sub-tile (16x16)
+            load_float_to_half(shmem_q, Q, 16, 16, d, row_q_start, d_chunk, N, d);
             
-            // Just load as Row Major into buffer...
-            if (k_idx + r < N && c < d) // This logic depends heavily on d vs N being inner/outer
-                smem_buffer[i] = to_half(inputK[(k_idx + r) * d + c]); // Assuming K is N x d
-            else
-                smem_buffer[i] = to_half(0.0f);
+            // Load K sub-tile (16x16). Note: K is N x d.
+            // We load standard layout, but interpret as col_major in MMA or transpose here.
+            // wmma::col_major expects the data in memory to be column major. 
+            // Our data in Global/Shmem is Row Major. 
+            // To get K^T, we rely on the fragment loader. 
+            // Loading (16x16) row-major data into a col_major fragment effectively transposes it 
+            // IF the matrix was square? No.
+            // We need Q(16x16) * K^T(16x16). 
+            // If we load K(row major) into Matrix_B(col_major), it treats rows as cols.
+            // So K(i,j) becomes B(j,i). Correct for K^T.
+            load_float_to_half(shmem_k, K, 16, 16, d, k_block, d_chunk, N, d);
+            
+            __syncthreads(); // Wait for loads
+            
+            wmma::load_matrix_sync(q_frag, shmem_q, 16);
+            wmma::load_matrix_sync(k_frag, shmem_k, 16);
+            
+            wmma::mma_sync(acc_s, q_frag, k_frag, acc_s);
+            __syncthreads(); // Sync for safety before next load
         }
-        
-        // ... But load into frag_K as COL_MAJOR to effect a transpose if needed?
-        // Actually, for Q * K^T where K is row-major in memory:
-        // Q is 16x16 (Row Major). K is 16x16 (Row Major in memory).
-        // Q * K^T = Row * Row. WMMA supports Row * Col.
-        // So we load K into Col_Major fragment? No, that expects memory to be col major.
-        // TRICK: Load K into accumulator, or transpose in shared mem. 
-        // For simplicity here, we assume d=16 or small and just run straightforward.
-        // Let's assume inputK is stored such that we can load it effectively.
-        // Standard WMMA Q*K^T requires one operand transposed.
-        
-        wmma::load_matrix_sync(frag_K, smem_buffer, WMMA_K); // Treating as Row Major for now
-        
-        // S = Q * K
-        wmma::fill_fragment(acc_S, 0.0f);
-        wmma::mma_sync(acc_S, frag_Q, frag_K, acc_S); // S = Q * K (Need to verify transpose logic for real app)
 
-        // -----------------------------------------------------------
-        // 2. ONLINE SOFTMAX
-        // -----------------------------------------------------------
+        // --- Step B: Online Softmax Correction ---
         
-        // Dump S (16x16 float) to shared to compute stats
-        __shared__ float smem_S[16 * 16];
-        wmma::store_matrix_sync(smem_S, acc_S, 16, wmma::mem_row_major);
+        // 1. Store Scores to Shared Memory (float)
+        wmma::store_matrix_sync(shmem_f, acc_s, 16, wmma::mem_row_major);
+        __syncthreads();
+
+        // 2. Compute Max/Exp/Sum per row
+        //    Since we have 32 threads and 16 rows, threads 0-15 handle rows 0-15.
+        float m_curr = -INFINITY;
+        float l_curr = 0.0f;
+        float correction = 1.0f; // Default if no update
         
-        // Compute Row Max and Exponentials
-        // Each thread handles ~8 elements? No, let's do simple row assignments.
-        // 32 threads. 16 rows. Threads 0-15 handle rows 0-15. Threads 16-31 handle rows 0-15 again (redundant)
-        
-        float local_max = -1e20f;
-        float local_sum = 0.0f;
-        
-        int row = laneId % 16;
-        if (laneId < 16) {
-            // Find max in row
-            for (int c = 0; c < 16; c++) {
-                local_max = max(local_max, smem_S[row * 16 + c]);
+        // Parallel Softmax (Naive per-thread row handling)
+        if (tx < 16) {
+            int row = tx;
+            float row_max = -INFINITY;
+            
+            // Find max
+            for (int c = 0; c < 16; ++c) {
+                // Apply Masking here if needed (e.g. causal)
+                // For now: pure attention
+                float val = shmem_f[row * 16 + c] * softmax_scale;
+                shmem_f[row * 16 + c] = val; // Scale in place
+                if (val > row_max) row_max = val;
             }
             
-            float old_max = smem_stats_max[row];
-            float new_max = max(old_max, local_max);
+            // Update Max Stats
+            // m_prev is thread-local register containing stats for this row
+            float m_old = m_prev;
+            m_curr = fmaxf(m_old, row_max);
             
-            // Compute exp sum
-            float term_sum = 0.0f;
-            for (int c = 0; c < 16; c++) {
-                term_sum += expf(smem_S[row * 16 + c] - new_max);
+            // Compute Exp & Sum
+            float row_sum = 0.0f;
+            for (int c = 0; c < 16; ++c) {
+                float val = __expf(shmem_f[row * 16 + c] - m_curr);
+                // Store P (prob) in half precision buffer (reuse shmem_q or shmem_k)
+                // We reuse shmem_q for P.
+                shmem_q[row * 16 + c] = __float2half(val); 
+                row_sum += val;
             }
             
-            // Update global sum: OldSum * exp(OldMax - NewMax) + CurrentSum
-            float factor = expf(old_max - new_max);
-            float new_sum = smem_stats_sum[row] * factor + term_sum;
+            // Update Sum Stats
+            // O_new = O_old * exp(m_old - m_curr) + P * V
+            correction = __expf(m_old - m_curr);
+            l_prev = l_prev * correction + row_sum;
+            m_prev = m_curr;
             
-            smem_stats_max[row] = new_max;
-            smem_stats_sum[row] = new_sum;
+            // Store correction factor to a known location for the whole warp to use?
+            // Actually, we need to rescale the ACCUMULATOR 'acc_o'.
+            // Since we can't easily map thread-to-accumulator-element, 
+            // we will scale acc_o via shared memory.
             
-            // Store scaling factor for O (previous O needs to be scaled down)
-            // Ideally we scale `acc_O` here. But acc_O is in registers.
-            // We skip rescaling O in this simplified demo, but in real FlashAttn O *= factor.
+            // Store correction in a buffer. Reuse shmem_v part or shmem_f end.
+            shmem_f[256 + row] = correction; 
         }
+        __syncthreads();
+
+        // --- Step C: Rescale Output Accumulator ---
         
-        // Calculate P (Softmax Scores)
-        // P = exp(S - Max)
-        // Store P into smem_buffer (half) for next matmul
-        // We do NOT divide by sum yet.
-        for (int i = laneId; i < 256; i += 32) {
+        // Store O to Shared Memory
+        wmma::store_matrix_sync(shmem_f, acc_o, 16, wmma::mem_row_major);
+        __syncthreads();
+
+        // Apply Correction to O (Parallel over 256 elements)
+        // Correction factor depends on ROW.
+        for (int i = tx; i < 256; i += 32) {
             int r = i / 16;
-            int c = i % 16;
-            float val = expf(smem_S[r*16+c] - smem_stats_max[r]);
-            smem_buffer[i] = to_half(val);
+            float corr = shmem_f[256 + r];
+            shmem_f[i] *= corr;
         }
+        __syncthreads();
+
+        // Load O back
+        wmma::load_matrix_sync(acc_o, shmem_f, 16, wmma::mem_row_major);
         
-        // -----------------------------------------------------------
-        // 3. COMPUTE O += P * V
-        // -----------------------------------------------------------
+        // --- Step D: Compute O += P * V ---
         
-        // Load P (already in smem_buffer)
-        wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __half, wmma::row_major> frag_P;
-        wmma::load_matrix_sync(frag_P, smem_buffer, 16);
+        // Load P (calculated in Step B) into fragment
+        wmma::load_matrix_sync(p_frag, shmem_q, 16);
         
-        // Load V Tile (16x16)
-        // V is (N x d). We are at row k_idx.
-        for (int i = laneId; i < 256; i += 32) {
-            int r = i / 16;
-            int c = i % 16;
-            if (k_idx + r < N && col_offset + c < d)
-                smem_buffer[i] = to_half(inputV[(k_idx + r) * d + (col_offset + c)]);
-            else
-                smem_buffer[i] = to_half(0.0f);
-        }
-        wmma::load_matrix_sync(frag_V, smem_buffer, 16);
+        // Load V sub-tile (16x16)
+        // We need the V block corresponding to the current k_block (which is row index for V)
+        // and the current head_dim block (col index for V/O).
+        load_float_to_half(shmem_v, V, 16, 16, d, k_block, col_d_start, N, d);
+        __syncthreads();
         
-        // O += P * V
-        wmma::mma_sync(acc_O, frag_P, frag_V, acc_O);
+        wmma::load_matrix_sync(v_frag, shmem_v, 16);
+        
+        // Accumulate
+        wmma::mma_sync(acc_o, p_frag, v_frag, acc_o);
+        __syncthreads();
     }
+
+    // ----------------------------------------------------------------
+    // 3. Finalize and Store Output
+    // ----------------------------------------------------------------
     
-    // -----------------------------------------------------------
-    // 4. FINALIZE (Divide by RowSum) AND STORE
-    // -----------------------------------------------------------
+    // Store O accumulator to Shared Memory
+    wmma::store_matrix_sync(shmem_f, acc_o, 16, wmma::mem_row_major);
+    __syncthreads();
     
-    __shared__ float smem_O[16 * 16];
-    wmma::store_matrix_sync(smem_O, acc_O, 16, wmma::mem_row_major);
-    
-    for (int i = laneId; i < 256; i += 32) {
-        int r = i / 16;
-        int c = i % 16;
+    // Normalize by l_prev and write to Global
+    if (tx < 16) {
+        int r = tx;
+        float div = 1.0f / (l_prev + 1e-8f); // Safety epsilon
         
-        if (row_offset + r < N && col_offset + c < d) {
-            float val = smem_O[r*16+c];
-            // Normalize
-            val = val / (smem_stats_sum[r] + 1e-6f); 
-            output[(row_offset + r) * d + (col_offset + c)] = val;
+        for (int c = 0; c < 16; ++c) {
+            float val = shmem_f[r * 16 + c];
+            val *= div;
+            
+            int global_r = row_q_start + r;
+            int global_c = col_d_start + c;
+            
+            if (global_r < N && global_c < d) {
+                O[global_r * d + global_c] = val;
+            }
         }
     }
 }

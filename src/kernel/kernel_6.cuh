@@ -115,6 +115,9 @@ __global__ void attention_v6(const float *__restrict inputQ,
     float oldMax[Rq];
     float newSum[Rq] = {0.0f};
 
+    // Scale factor for attention: 1 / sqrt(d)
+    float scale = 1.0f / sqrtf((float)d);
+
     float val[Rq * Bk];
 
     int indV = Rv * blockIdx.x * blockDim.x;
@@ -143,6 +146,15 @@ __global__ void attention_v6(const float *__restrict inputQ,
         }
         matmulRQK_6<Bd, Bk, Rq, numQ, numK>(inputQ, inputK, shareQK, shareVK, N, d, width, indQ, indK,
                   val);
+        
+        // Apply scale factor: QK^T / sqrt(d)
+        for (int index_q = 0; index_q < Rq; index_q++)
+        {
+            for (int index_k = 0; index_k < Bk; index_k++)
+            {
+                val[index_q * Bk + index_k] *= scale;
+            }
+        }
 
         for (int index_q = 0; index_q < Rq; index_q++)
         {
