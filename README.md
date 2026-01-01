@@ -2,176 +2,107 @@
 
 ## Overview
 
-**Minimal Flash Attention** is a minimal, educational implementation of the Flash Attention algorithm in CUDA for inference workloads. This project provides a clear, step-by-step implementation of the Flash Attention algorithm with progressive optimizations across 8 different kernel variants (0-7), showcasing various CUDA optimization techniques.
+**Minimal Flash Attention** is an educational CUDA implementation of the Flash Attention algorithm for inference workloads. The project demonstrates progressive optimization through 8 kernel variants (1-8), each building upon the previous with advanced CUDA techniques.
 
-The Flash Attention algorithm is an efficient attention mechanism that reduces memory bandwidth requirements by computing attention scores in a tiled manner with online softmax computation, avoiding the need to store the full attention matrix.
-
-## Key Features
-
-- **8 Progressive Kernel Implementations**: From basic to highly optimized versions including Tensor Core utilization
-- **Educational Focus**: Clean, well-commented code suitable for learning CUDA optimization techniques
-- **Performance Benchmarking**: Compare performance across different optimization strategies
-- **Algorithm Implementation**: Full implementation of Flash Attention with tiling and online softmax
-- **Modular Design**: Separate kernels for different optimization strategies
-
+The implementation follows the standard Flash Attention algorithm with tiling and online softmax to avoid storing the full attention matrix, reducing memory bandwidth requirements.
 
 ## Kernel Variants
 
-| Kernel | Description | Key Optimizations | Block Sizes |
-|--------|-------------|-------------------|-------------|
-| **0** | WMMA Tensor Core Implementation | Uses NVIDIA's WMMA API for 16x16 matrix operations on Tensor Cores | Block: 32 threads (1 warp)<br>Tile: 16x16 |
-| **1** | Basic Implementation | Initial Flash Attention with tiling and online softmax | Br=32, Bc=32 |
-| **2** | Shared Memory Optimized | Block tiling using shared memory usage patterns with better memory coalescing, one thread handle an element in a tile | Br=32, Bc=32 |
-| **3** | Register Tiling | Register tiling, one thread handle a tile, better instruction-level parallelism，warp-level reductions | Br=32, Bc=32<br>Rq=2, Rv=4 |
-| **4** | Better Register Tiling | Kernel 3 + shared memory reuse | Br=32, Bc=32<br>Rq=3, Rv=4 |
-| **5** | Vectorized Instructions | Kernel 4 + Vectorized memory operations using `float4` | Br=32, Bc=32<br>Rq=3, Rv=4 |
-| **6** | bank-conflict-free | padded shared memory | Br=16, Bc=16<br>Rq=8, Rv=8<br>Bk=8, Bd=8 |
-| **7** | Optimized Pipeline Implementation | Double-buffered shared memory pipeline, advanced vectorization, optimized computation patterns | Br=16, Bc=16<br>Rq=8, Rv=8<br>Bk=8, Bd=8 |
+| Kernel | Optimization Focus | Key Techniques | Block Size | Register Tiling | Performance* |
+|--------|-------------------|----------------|------------|-----------------|--------------|
+| **1** | Baseline | Basic tiling, online softmax | Br=32, Bc=32 | 1×1 | 258.18 ms |
+| **2** | Memory Coalescing | Shared memory optimization, better access patterns | Br=32, Bc=32 | 1×1 | 32.90 ms |
+| **3** | Register Usage | Warp-level reductions, instruction-level parallelism | Br=32, Bc=32 | Rq=2, Rv=4 | 6.11 ms |
+| **4** | Shared Memory Reuse | Improved buffer reuse, efficient shared memory | Br=32, Bc=32 | Rq=3, Rv=4 | 4.93 ms |
+| **5** | Vectorization | `float4` vectorized memory operations | Br=32, Bc=32 | Rq=3, Rv=4 | 5.76 ms |
+| **6** | Bank Conflict Free | Padded shared memory, reduced conflicts | Br=16, Bc=16 | Rq=8, Rv=8 | 2.41 ms |
+| **7** | Pipeline Optimization | Double-buffered shared memory, compute/memory overlap | Br=16, Bc=16 | Rq=8, Rv=8 | 2.12 ms |
+| **8** | Tensor Cores | WMMA API, FP16 precision, 16×16 tile operations | 32 threads (1 warp) | 16×16 tiles | 15.76 ms |
 
-## Algorithm Details
+*Performance measured on N=1024, d=1024 matrices (average of 10 runs on NVIDIA RTX 4500 Ada)
 
-### Flash Attention Algorithm
-The implementation follows the standard Flash Attention algorithm:
+**Note**: Kernel 8 uses FP16 precision for Tensor Core operations, resulting in higher numerical error (max diff: 1.65e-02) compared to FP32 reference.
 
+## Algorithm
+
+The implementation follows the Flash Attention algorithm:
 1. **Tiling**: Split Q, K, V matrices into blocks (Br × d, Bc × d)
 2. **Online Softmax**: Compute softmax incrementally to avoid storing full attention matrix
-3. **Memory Hierarchy**: Efficient use of shared memory and registers
+3. **Memory Hierarchy**: Efficient use of registers, shared memory, and global memory
 4. **Numerical Stability**: Safe softmax computation with max subtraction
 
-### Matrix Dimensions
-- **N** = 1024 (sequence length)
-- **d** = 1024 (embedding dimension)
-- **Br** = 32 (Q block rows)
-- **Bc** = 32 (K/V block columns)
+**Matrix Dimensions**: N = 1024 (sequence length), d = 1024 (embedding dimension)
 
 ## Prerequisites
 
-- **NVIDIA GPU** with Compute Capability ≥ 7.0 (Volta architecture or newer)
-- **CUDA Toolkit** (version 11.0 or newer recommended)
+- **NVIDIA GPU** with Compute Capability ≥ 7.0 (Volta or newer)
+- **CUDA Toolkit** (version 11.0 or newer)
 - **CMake** (version 3.0 or newer)
 - **C++ Compiler** with C++11 support
 
-## Build Instructions
+## Build & Usage
 
+### Quick Start
 ```bash
-# Make the script executable
-chmod +x run.sh
-
-# Run the script (builds and tests all kernels)
-./run.sh
-```
-The build process will generate an executable named `flash` in the project root directory. The `run.sh` script automatically builds the project, runs all kernels (0-7), and validates their correctness against a Python reference implementation.
-
-## Usage
-
-### Basic Usage
-```bash
-# Run a specific kernel (0-7)
-./flash <kernel_number>
+chmod +x run.sh    # Make script executable
+./run.sh           # Build, test, and validate all kernels
 ```
 
-### Examples
+The `run.sh` script automates the entire process:
+1. **Build**: Compiles the project using CMake, generating `flash` executable
+2. **Test**: Runs all 8 kernels with N=1024, d=1024 matrices
+3. **Validate**: Compares outputs with Python reference (tolerance: 1e-4)
+
+### Running Individual Kernels
 ```bash
-# Run WMMA Tensor Core implementation (kernel 0)
-./flash 0
+./flash <kernel_number>  # Run specific kernel (1-8)
 
-# Run basic Flash Attention implementation (kernel 1)
-./flash 1
-
-....
+# Examples:
+./flash 1  # Baseline implementation
+./flash 3  # Register tiling optimization  
+./flash 8  # Tensor Core (FP16) implementation
 ```
 
-### Program Output
-The program will display:
-- Selected kernel number
-- Average execution time over 10 runs (in milliseconds)
-- Validation results comparing with Python reference implementation
+**Output**: Kernel number, execution time (ms), and output file (`kernel<number>_output.txt`)
 
-### Validation and Testing
-The project includes a comprehensive validation system to verify the correctness of each CUDA kernel:
+## Validation
 
-```bash
-# Run the complete validation suite
-./run.sh
+The validation system ensures correctness across all kernels:
 
-# Output includes:
-# 1. Python reference implementation results
-# 2. CUDA kernel execution times
-# 3. Comparison with Python reference (tolerance: 1e-4)
-# 4. Pass/Fail status for each kernel
-```
+### Process
+1. Python reference (`flash.py`) generates ground truth using standard self-attention
+2. Each CUDA kernel (1-8) executes and produces output
+3. Outputs are compared with reference using `compare.py` (tolerance: 1e-4)
 
-**Example kernel execution times** (on typical hardware):
-- Kernel 0 (WMMA): 0.602 ms
-- Kernel 1 (Basic): 259.100 ms
-- Kernel 2 (Shared Memory): 32.968 ms
-- Kernel 3 (Register Tiling): 6.029 ms
-- Kernel 4 (Better Register Tiling): 4.661 ms
-- Kernel 5 (Vectorized): 5.664 ms
-- Kernel 6 (Bank-conflict-free): 2.310 ms
-- Kernel 7 (Optimized Pipeline): 2.022 ms
+### Results
+- **Kernels 1-7**: ✅ PASS (all values within 1e-4 tolerance)
+- **Kernel 8**: ⚠️ Higher error (max diff: 1.65e-02) due to FP16 Tensor Core precision
 
-**Validation Tools**:
-- `compare.py`: Compare two output files with configurable tolerance
-- `flash.py`: Python reference implementation of Flash Attention
-- `run.sh`: Automated build, test, and validation script
+**Tools**: `compare.py` (comparison), `flash.py` (reference), `run.sh` (automated testing)
 
-**Validation Process**:
-1. Python generates reference outputs using three algorithms:
-   - Standard Self-Attention
-   - Online Softmax Attention
-   - Flash Attention Tiled
-2. Each CUDA kernel (0-7) runs and produces output
-3. Kernel outputs are compared with Python reference (standard self-attention)
-4. Results are validated within tolerance (1e-4 by default)
+## Implementation
 
-## Educational Value
+### Code Structure
+- **`src/kernel/common.cuh`**: Warp-level reduction templates (`WarpAllReduce`, `MaxOp`, `SumOp`)
+- **`src/kernel/kernel_*.cuh`**: 8 kernel variants with progressive optimizations
+- **`flash.cu`**: Main driver for kernel execution and timing
+- **`src/utils.cu/.cuh`**: Utility functions for matrix operations and error checking
 
-This project serves as an educational resource for:
+### Optimization Progression
+1. **Kernels 1-2**: Memory access patterns and shared memory usage
+2. **Kernels 3-5**: Register tiling, vectorization, and warp-level operations
+3. **Kernels 6-7**: Advanced techniques (bank conflict avoidance, pipelining)
+4. **Kernel 8**: Tensor Core utilization with WMMA API (FP16 precision)
 
-### CUDA Programming Concepts
-- **Shared Memory Usage**: Efficient data sharing between threads
-- **Warp-Level Operations**: Using `__shfl_xor_sync` for reductions
-- **Memory Coalescing**: Optimized memory access patterns
-- **Kernel Launch Configuration**: Grid and block dimension tuning
+## Performance Summary
 
-### Algorithm Implementation
-- **Online Softmax**: Incremental computation for numerical stability
-- **Tiling Strategies**: Block matrix operations for large matrices
-- **Numerical Precision**: Handling floating-point precision issues
+The kernel table includes actual performance data from terminal_output (N=1024, d=1024, average of 10 runs). Key observations:
 
-### Optimization Techniques
-- **Loop Unrolling**: Manual and compiler-assisted unrolling
-- **Instruction-Level Parallelism**: Using FMA (fused multiply-add) instructions
-- **Memory Hierarchy**: Effective use of registers, shared memory, and global memory
+- **Optimization Impact**: Progressive optimizations yield over 120× speedup from Kernel 1 to Kernel 7
+- **Tensor Cores**: Kernel 8 uses FP16 Tensor Cores (15.76 ms) - faster than baseline but with precision trade-off
+- **Best Performance**: Kernel 7 achieves 2.12 ms (121.8× speedup) with advanced pipelining
 
-## Implementation Details
-
-### Key Components
-
-#### 1. Common Operations (`src/kernel/common.cuh`)
-- `WarpAllReduce`: Template for warp-level reductions
-- `MaxOp`, `SumOp`: Functors for max and sum operations
-
-#### 2. Utility Functions (`src/utils.cu/.cuh`)
-- Matrix initialization and verification
-- CUDA error checking
-- Timing functions
-- Device information display
-
-#### 5. Validation System
-- `compare.py`: File comparison with error statistics
-- `flash.py`: Python reference implementation
-- `run.sh`: Automated testing and validation
-
-#### 3. Main Driver (`flash.cu`)
-- Command-line argument parsing
-- Memory allocation and data transfer
-- Kernel execution and timing
-- Cleanup and result reporting
-
-#### 4. Kernel Implementations
-Each kernel in `src/kernel/` demonstrates different optimization strategies while maintaining the same algorithmic correctness.
+**Note**: Performance varies with GPU architecture and CUDA version.
 
 ## References
 
@@ -179,30 +110,6 @@ Each kernel in `src/kernel/` demonstrates different optimization strategies whil
 
 2. ggluo: [The details of flash attention - algorithm](https://ggluo.github.io/blog/flash-attention-1)
 
-
-## Future Work
-
-Potential enhancements and extensions:
-
-1. **Flexible Matrix Sizes**: Support for arbitrary N and d dimensions
-2. **Batch Processing**: Extension to batch attention computation
-3. **Mixed Precision**: Support for FP16 and BF16 precision
-4. **Multi-GPU Support**: Distributed attention computation
-5. **Attention Variants**: Implementation of different attention mechanisms
-6. **Performance Profiling**: Detailed performance analysis tools
-7. **Python Bindings**: PyTorch/CUDA extensions for easy integration
-
 ## License
 
 This project is intended for educational purposes. Please refer to the original repository for specific licensing information.
-
-## Contributing
-
-This is an educational project. For contributions, please:
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request with clear documentation of changes
-
----
-
-**Note**: This implementation is optimized for clarity and educational value. For production use, consider using optimized libraries like FlashAttention-2 or vendor-optimized implementations.
