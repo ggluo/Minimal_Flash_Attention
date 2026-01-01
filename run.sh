@@ -49,7 +49,7 @@ declare -a TEST_RESULTS
 ALL_PASSED=true
 
 # Test each kernel
-for ((i=0; i<=7; i++))
+for ((i=1; i<=8; i++))
 do
     echo "--- Testing Kernel ${i} ---"
     
@@ -119,7 +119,7 @@ echo "=== Test Summary ==="
 echo ""
 
 echo "Kernel Test Results:"
-for ((i=0; i<=7; i++))
+for ((i=1; i<=8; i++))
 do
     if [[ "${TEST_RESULTS[$i]}" == PASS* ]]; then
         echo "  Kernel ${i}: ✅ ${TEST_RESULTS[$i]}"

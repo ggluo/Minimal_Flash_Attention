@@ -258,9 +258,6 @@ void test_kernel(const float *__restrict inputQ,
                 float *__restrict output,int N, int d,
                 int kernel_num, bool dummy) {
     switch (kernel_num) {
-        case 0:
-            test_wmma_attention(inputQ, inputK, inputV, N, d, output, dummy);
-            break;
         case 1:
             test_attention_v1<32, 32>(inputQ, inputK, inputV, N, d, output);
             break;
@@ -283,6 +280,9 @@ void test_kernel(const float *__restrict inputQ,
             test_attention_v7<16, 16>(inputQ, inputK, inputV, N, d, output);
             break;
         case 8:
+            test_wmma_attention(inputQ, inputK, inputV, N, d, output, dummy);
+            break;
+        case 9: // leave it for testing new kernel
             test<32, 32>(inputQ, inputK, inputV, N, d, output);
             break;
         default:
